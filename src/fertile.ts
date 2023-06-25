@@ -1,20 +1,26 @@
 import { useEffect, useState } from "react";
 
-const evener = new EventTarget()
-const changeEvent = `storeChange${Date.now()}`
-const allStores:any = {}
-const observableMap:WeakMap<object, Record<PropertyKey, boolean | undefined>> = new WeakMap()
+type AnnotationsMap<T, V> = {
+  [P in Exclude<keyof T, "toString">]?: V;
+};
+
+const evener = new EventTarget();
+const event = `$$emit${performance.now()}`;
+const allStores:any = {};
+const observableMap:WeakMap<object, Record<PropertyKey, boolean | undefined>> = new WeakMap();
 
 let isRunAction = false;
-let timer:any = null
+let timer:any = null;
 
 function emit(){
   if(timer){
     clearTimeout(timer);
   }
-  timer = setTimeout(()=>{
-    evener.dispatchEvent(new Event(changeEvent));
-  }, 0)
+  timer = setTimeout(dispatch, 0);
+}
+
+function dispatch(){
+  evener.dispatchEvent(new Event(event));
 }
 
 export function createStore<T extends object>(stores:T):typeof useStore<T>{
@@ -26,40 +32,36 @@ export function createStore<T extends object>(stores:T):typeof useStore<T>{
         const rel = Reflect.set(target, property, value, reciver);
         if(observableMap.has(target) && observableMap.get(target)![property] === false) return rel;
         if(!isRunAction && rel){
-          emit()
+          emit();
         }
         return rel;
       }
     });
   });
-  return useStore
+  return useStore;
 }
 
-export type AnnotationsMap<T, V> = {
-  [P in Exclude<keyof T, "toString">]?: V;
-};
-
 export function makeObservable<T extends object>(target:T, overrides: AnnotationsMap<T, boolean> ){
-  observableMap.set(target, overrides)
+  observableMap.set(target, overrides);
 }
 
 export const runAction = (action:()=>void)=>{
   isRunAction = true;
   try{
-    action()
-    evener.dispatchEvent(new Event(changeEvent));
+    action();
+    dispatch();
   }finally{
     isRunAction = false;
   }
 }
 
 export function useStore<T=any>():T{
-  const [, setForceUpdate] = useState(0)
+  const [, setForceUpdate] = useState(0);
   useEffect(()=>{
     const callback = ()=>{setForceUpdate((pre) => pre + 1)}
-    evener.addEventListener(changeEvent, callback);
+    evener.addEventListener(event, callback);
       return ()=>{
-        evener.removeEventListener(changeEvent, callback)
+        evener.removeEventListener(event, callback);
       }
   }, [])
 

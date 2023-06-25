@@ -2,10 +2,19 @@
   "name": "fertile",
   "version": "1.0.0",
   "description": "一个简单的react状态管理库",
-  "main": "index.js",
+  "main": "dist/fertile.cjs.js",
+  "module": "dist/fertile.esm.js",
+  "types": "dist/fertile.d.ts",
+  "files": [
+    "/dist",
+    "LICENSE"
+  ],
   "scripts": {
     "test": "jest",
-    "coverage": "jest --coverage"
+    "coverage": "jest --coverage",
+    "build": "tsc && rollup -c --bundleConfigAsCjs",
+    "check": "npm pack --dry-run",
+    "release": "npm run build && npm publish"
   },
   "repository": {
     "type": "git",
@@ -37,6 +46,7 @@
     "@types/react-dom": "^18.2.4",
     "jest": "^29.5.0",
     "jest-environment-jsdom": "^29.5.0",
+    "rollup": "^3.25.2",
     "ts-jest": "^29.1.0",
     "typescript": "^5.1.3"
   }
