@@ -6,7 +6,7 @@ export const stores = {
   todo: new TodoStore()
 }
 
-const useStore = createStore(stores)
+const {useStore} = createStore(stores)
 
 export default ()=>{
   const {todo} = useStore();

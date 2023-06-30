@@ -23,7 +23,7 @@ function dispatch(){
   evener.dispatchEvent(new Event(event));
 }
 
-export function createStore<T extends object>(stores:T):typeof useStore<T>{
+export function createStore<T extends object>(stores:T):{useStore:typeof useStore<T>, stores:T}{
   const storeSelf:any = stores
   Object.keys(storeSelf).forEach(key =>{
     allStores[key] = new Proxy(storeSelf[key], {
@@ -38,7 +38,7 @@ export function createStore<T extends object>(stores:T):typeof useStore<T>{
       }
     });
   });
-  return useStore;
+  return {useStore, stores: allStores};
 }
 
 export function makeObservable<T extends object>(target:T, overrides: AnnotationsMap<T, boolean> ){
@@ -55,14 +55,17 @@ export const runAction = (action:()=>void)=>{
   }
 }
 
-export function useStore<T=any>():T{
+function useStore<T=any>(disabledUpdate?:boolean):T{
   const [, setForceUpdate] = useState(0);
   useEffect(()=>{
+    // disabledUpdate为ture时就不会触发组件更新，适合只调用了store方法但没用store值的组件
+    if(!disabledUpdate){
     const callback = ()=>{setForceUpdate((pre) => pre + 1)}
-    evener.addEventListener(event, callback);
+      evener.addEventListener(event, callback);
       return ()=>{
         evener.removeEventListener(event, callback);
       }
+    }
   }, [])
 
   return allStores;
