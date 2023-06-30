@@ -1,72 +1,116 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type AnnotationsMap<T, V> = {
   [P in Exclude<keyof T, "toString">]?: V;
 };
 
-const evener = new EventTarget();
-const event = `$$emit${performance.now()}`;
-const allStores:any = {};
-const observableMap:WeakMap<object, Record<PropertyKey, boolean | undefined>> = new WeakMap();
+export type UseStoreHook<T> = (disabledUpdate?:boolean) => T
 
-let isRunAction = false;
+const evener = new EventTarget();
+const observableMap:WeakMap<object, Record<PropertyKey, boolean | undefined>> = new WeakMap();
+const storeEventMap:WeakMap<object, string> = new WeakMap();
+const storeMap:Map<string, any> = new Map()
+
 let timer:any = null;
 
-function emit(){
-  if(timer){
-    clearTimeout(timer);
-  }
-  timer = setTimeout(dispatch, 0);
-}
-
-function dispatch(){
-  evener.dispatchEvent(new Event(event));
-}
-
-export function createStore<T extends object>(stores:T):{useStore:typeof useStore<T>, stores:T}{
-  const storeSelf:any = stores
+export function createStore<T extends object>(stores:T, name?:string):{useStore:UseStoreHook<T>, stores:T}{
+  const storeSelf:any = stores;
+  const allStores:any = {};
+  const storeName = getStoreName(name);
   Object.keys(storeSelf).forEach(key =>{
+    storeEventMap.set(storeSelf[key], storeName);
     allStores[key] = new Proxy(storeSelf[key], {
       set(target, property, value, reciver){
         if(Reflect.get(target, property, reciver) === value) return true;
         const rel = Reflect.set(target, property, value, reciver);
         if(observableMap.has(target) && observableMap.get(target)![property] === false) return rel;
-        if(!isRunAction && rel){
-          emit();
+        if(rel){
+          const eventName = storeEventMap.get(target)
+          if(eventName){
+            emit(`$$fertile_emit_${eventName}`);
+          }
         }
         return rel;
       }
     });
   });
-  return {useStore, stores: allStores};
+  storeMap.set(storeName, allStores);
+  return {
+    useStore: ((disabledUpdate?:boolean)=>useStore(disabledUpdate, storeName)) as UseStoreHook<T>, 
+    stores: 
+    allStores
+  };
 }
 
+export function useCreateLocalStore<T extends object>(stores:T, name:string){
+  return useMemo(() => {
+		const rel =
+			getStore<T>(name) ??
+			createLocalStore(stores, name);
+		return {
+			...rel,
+			destroyStore: removeStore.bind(null, name),
+		};
+	}, [name]);
+}
+
+export function removeStore(name:string | "default"){
+  storeMap.delete(name);
+}
+
+export function hasStore(name:string | "default"){
+  return storeMap.has(name);
+}
+
+/**
+ * 返回指定名称的store
+ * @param name 默认 "default"
+ * @returns 
+ */
+export function getStore<T extends object>(name:string | "default"):{useStore:UseStoreHook<T>, stores:T} | undefined{
+  if(hasStore(name)){
+    const stores = storeMap.get(name);
+    return {useStore: ((disabledUpdate?:boolean)=>useStore(disabledUpdate, name)) as UseStoreHook<T>, stores: stores}
+  }
+}
+
+// 可以指定那些属性不触发更新
 export function makeObservable<T extends object>(target:T, overrides: AnnotationsMap<T, boolean> ){
   observableMap.set(target, overrides);
 }
 
-export const runAction = (action:()=>void)=>{
-  isRunAction = true;
-  try{
-    action();
-    dispatch();
-  }finally{
-    isRunAction = false;
-  }
-}
-
-function useStore<T=any>(disabledUpdate?:boolean):T{
-  const [, setForceUpdate] = useState(0);
+function useStore<T=any>(disabledUpdate?:boolean, name?:string):T{
+  const [, setForceUpdate] = useState({});
   useEffect(()=>{
+    const eventName = `$$fertile_emit_${getStoreName(name)}`
     // disabledUpdate为ture时就不会触发组件更新，适合只调用了store方法但没用store值的组件
     if(!disabledUpdate){
-    const callback = ()=>{setForceUpdate((pre) => pre + 1)}
-      evener.addEventListener(event, callback);
+      const callback = ()=>{setForceUpdate({})}
+      evener.addEventListener(eventName, callback);
       return ()=>{
-        evener.removeEventListener(event, callback);
+        evener.removeEventListener(eventName, callback);
       }
     }
   }, [])
 
-  return allStores;
+  return storeMap.get(getStoreName(name));
+}
+
+function getStoreName(name?:string){
+  return name || "default"
+}
+
+function emit(event:string){
+  if(timer){
+    clearTimeout(timer);
+  }
+  timer = setTimeout(dispatch, 0, event);
+}
+
+function dispatch(event:string){
+  evener.dispatchEvent(new Event(event));
+}
+
+function createLocalStore<T extends object>(stores:T, name:string){
+  return createStore(stores, name)
 }
