@@ -67,6 +67,7 @@ function track(target:any, property:Property){
  * @param property 
  * @returns 
  */
+const triggerCallbacks:Set<StoreEffectCallback> = new Set();
 function trigger(target:any, property:Property){
   const desMap = storeEffectMap.get(target);
   if(!desMap) return;
@@ -75,10 +76,23 @@ function trigger(target:any, property:Property){
   if(effectCallbacks){
     effectCallbacks.forEach(callback =>{
       if(callback){
-        callback();
+        triggerCallbacks.add(callback);
       }
     })
   }
+  runUpdate();
+}
+
+let timer:any = null;
+function runUpdate(){  
+  if(timer){
+    clearTimeout(timer)
+  }
+  timer = setTimeout(()=>{
+    triggerCallbacks.forEach(callback =>{
+      callback();
+    });
+  });
 }
 
 function removeProperty(target:any, property:Property){

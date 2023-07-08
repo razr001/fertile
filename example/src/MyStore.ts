@@ -9,7 +9,20 @@ export default class MyStore {
   // }
 
   add(){
-    this.count++
+    this.count++;
+    this.count++;
+    this.count++;
+    this.count++;
+    this.count++;
+    this.count++;
+    this.count++;
+    this.count++;
+    this.count++;
+    this.count++;
+    this.count++;
+    this.count++;
+    this.count++;
+    this.count++;
     this.test = {total:this.count + 3}
   }
 }
