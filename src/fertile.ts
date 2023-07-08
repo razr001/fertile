@@ -1,36 +1,136 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 type AnnotationsMap<T, V> = {
   [P in Exclude<keyof T, "toString">]?: V;
 };
 
+type StoreName = string;
+type Property = string | symbol;
+type StoreEffectCallback = (()=>any);
+type DesMap = Map<Property, Set<StoreEffectCallback>>;
+type ReactiveObject = object
+
 export type UseStoreHook<T> = (disabledUpdate?:boolean) => T
 
-const evener = new EventTarget();
+// 不需要响应的值
 const observableMap:WeakMap<object, Record<PropertyKey, boolean | undefined>> = new WeakMap();
-const storeEventMap:WeakMap<object, string> = new WeakMap();
-const storeMap:Map<string, any> = new Map()
+// 多个store，通过名称关联
+const storeMap:Map<StoreName, any> = new Map();
+// 响应数据时对应执行所有更新函数
+const storeEffectMap:WeakMap<ReactiveObject, DesMap> = new WeakMap();
+// 更新函数对应响应对象，主要用于更新函数销毁,并对storeEffectMap的相关数据进行删除
+const effectCallbackTargets:WeakMap<StoreEffectCallback, Set<ReactiveObject>> = new WeakMap();
 
-let timer:any = null;
+let currStoreEffectCallback:StoreEffectCallback | null = null;
+
+function getStoreName(name?:string){
+  return name || "default"
+}
+
+function createLocalStore<T extends object>(stores:T, name:string){
+  return createStore(stores, name)
+}
+
+/**
+ * 绑定响应数据和更新函数
+ * @param target 
+ * @param property 
+ * @returns 
+ */
+function track(target:any, property:Property){
+  if(!currStoreEffectCallback || typeof target[property] === "function") return;
+
+  let desMap:DesMap | undefined = storeEffectMap.get(target);
+  if(!desMap){
+    desMap = new Map();
+    storeEffectMap.set(target, desMap);
+  }
+  let effectCallbacks = desMap.get(property);
+  if(!effectCallbacks){
+    effectCallbacks = new Set();
+    desMap.set(property, effectCallbacks);
+  }
+  effectCallbacks.add(currStoreEffectCallback);
+
+  if(!effectCallbackTargets.has(currStoreEffectCallback)){
+    const targetSet = new Set<object>();
+    targetSet.add(target);
+    effectCallbackTargets.set(currStoreEffectCallback, targetSet);
+  }else{
+    effectCallbackTargets.get(currStoreEffectCallback)!.add(target)
+  }
+}
+
+/**
+ * 触发响应更新
+ * @param target 
+ * @param property 
+ * @returns 
+ */
+function trigger(target:any, property:Property){
+  const desMap = storeEffectMap.get(target);
+  if(!desMap) return;
+
+  const effectCallbacks = desMap.get(property);
+  if(effectCallbacks){
+    effectCallbacks.forEach(callback =>{
+      if(callback){
+        callback();
+      }
+    })
+  }
+}
+
+function removeProperty(target:any, property:Property){
+  const desMap = storeEffectMap.get(target);
+  if(!desMap) return;
+
+  desMap.delete(property)
+}
+
+function removeCallback(effectCallback:StoreEffectCallback){
+  const targets = effectCallbackTargets.get(effectCallback);
+  if(targets){
+    targets.forEach(target =>{
+      const desMap = storeEffectMap.get(target);
+      if(desMap){
+        desMap.forEach((effectSet)=>{
+          effectSet.delete(effectCallback)
+        });
+      }
+    });
+    effectCallbackTargets.delete(effectCallback)
+  }
+
+}
 
 export function createStore<T extends object>(stores:T, name?:string):{useStore:UseStoreHook<T>, stores:T}{
   const storeSelf:any = stores;
   const allStores:any = {};
   const storeName = getStoreName(name);
   Object.keys(storeSelf).forEach(key =>{
-    storeEventMap.set(storeSelf[key], storeName);
-    allStores[key] = new Proxy(storeSelf[key], {
+      allStores[key] = new Proxy(storeSelf[key], {
+      get(target, property){
+        const value = Reflect.get(target, property);
+        const observableTarget = observableMap.get(target);
+        if(!observableTarget || observableTarget[property] === undefined || observableTarget[property]){
+          track(target, property)
+        }
+        return value;
+      },
+
       set(target, property, value, reciver){
         if(Reflect.get(target, property, reciver) === value) return true;
         const rel = Reflect.set(target, property, value, reciver);
-        if(observableMap.has(target) && observableMap.get(target)![property] === false) return rel;
         if(rel){
-          const eventName = storeEventMap.get(target)
-          if(eventName){
-            emit(`$$fertile_emit_${eventName}`);
-          }
+          trigger(target, property)
         }
         return rel;
+      },
+
+      deleteProperty(target, property){
+        removeProperty(target, property)
+        return Reflect.deleteProperty(target, property);
       }
     });
   });
@@ -42,11 +142,19 @@ export function createStore<T extends object>(stores:T, name?:string):{useStore:
   };
 }
 
-export function useCreateLocalStore<T extends object>(stores:T, name:string){
+/**
+ * 创建组件范围里的store, 其他组件可以通过name获取
+ * @param stores 
+ * @param name 
+ * @returns 
+ */
+export function useCreateLocalStore<T extends object>(stores:(()=>T) | T, name:string){
   return useMemo(() => {
+    // const _stores = typeof stores === "function" ? (stores as Function)() : stores
+    const _stores = getStore<T>(name);
 		const rel =
-			getStore<T>(name) ??
-			createLocalStore(stores, name);
+      _stores || 
+			createLocalStore(typeof stores === "function" ? (stores as Function)() : stores, name);
 		return {
 			...rel,
 			destroyStore: removeStore.bind(null, name),
@@ -74,43 +182,24 @@ export function getStore<T extends object>(name:string | "default"):{useStore:Us
   }
 }
 
-// 可以指定那些属性不触发更新
+// 可以指定哪些属性作为或者不作为响应数据
 export function makeObservable<T extends object>(target:T, overrides: AnnotationsMap<T, boolean> ){
   observableMap.set(target, overrides);
 }
 
-function useStore<T=any>(disabledUpdate?:boolean, name?:string):T{
+export function useStore<T=any>(disabledAutoUpdate?:boolean, name?:string):T{
   const [, setForceUpdate] = useState({});
   useEffect(()=>{
-    const eventName = `$$fertile_emit_${getStoreName(name)}`
-    // disabledUpdate为ture时就不会触发组件更新，适合只调用了store方法但没用store值的组件
-    if(!disabledUpdate){
-      const callback = ()=>{setForceUpdate({})}
-      evener.addEventListener(eventName, callback);
-      return ()=>{
-        evener.removeEventListener(eventName, callback);
-      }
+    return ()=> removeCallback(storeEffectCallback)
+  }, []);
+
+  const storeEffectCallback = useCallback(()=>{
+    if(!disabledAutoUpdate){
+      setForceUpdate({});
     }
-  }, [])
+  }, []);
+
+  currStoreEffectCallback = storeEffectCallback;
 
   return storeMap.get(getStoreName(name));
-}
-
-function getStoreName(name?:string){
-  return name || "default"
-}
-
-function emit(event:string){
-  if(timer){
-    clearTimeout(timer);
-  }
-  timer = setTimeout(dispatch, 0, event);
-}
-
-function dispatch(event:string){
-  evener.dispatchEvent(new Event(event));
-}
-
-function createLocalStore<T extends object>(stores:T, name:string){
-  return createStore(stores, name)
 }
