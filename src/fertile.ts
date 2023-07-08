@@ -61,13 +61,15 @@ function track(target:any, property:Property){
   }
 }
 
+
+const triggerCallbacks:Set<StoreEffectCallback> = new Set();
+let pending = false;
 /**
  * 触发响应更新
  * @param target 
  * @param property 
  * @returns 
  */
-const triggerCallbacks:Set<StoreEffectCallback> = new Set();
 function trigger(target:any, property:Property){
   const desMap = storeEffectMap.get(target);
   if(!desMap) return;
@@ -78,20 +80,22 @@ function trigger(target:any, property:Property){
       if(callback){
         triggerCallbacks.add(callback);
       }
-    })
+    });
   }
-  runUpdate();
+
+  if(!pending){
+    pending = true;
+    Promise.resolve(null).then(runUpdate).catch((error)=>console.error(error));
+  }
 }
 
-let timer:any = null;
-function runUpdate(){  
-  if(timer){
-    clearTimeout(timer)
-  }
-  timer = setTimeout(()=>{
-    triggerCallbacks.forEach(callback =>{
-      callback();
-    });
+/**
+ * 执行更新
+ */
+function runUpdate(){
+  pending = false;
+  triggerCallbacks.forEach(callback =>{
+    callback();
   });
 }
 
