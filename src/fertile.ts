@@ -148,13 +148,13 @@ export function createStore<T extends object>(stores:T, name?:string):{useStore:
  * @param name 
  * @returns 
  */
-export function useCreateLocalStore<T extends object>(stores:(()=>T) | T, name:string){
+export function useCreateLocalStore<T extends object>(stores:()=>T | T, name:string){
   return useMemo(() => {
     // const _stores = typeof stores === "function" ? (stores as Function)() : stores
     const _stores = getStore<T>(name);
 		const rel =
       _stores || 
-			createLocalStore(typeof stores === "function" ? (stores as Function)() : stores, name);
+			createLocalStore(typeof stores === "function" ? stores() : stores, name);
 		return {
 			...rel,
 			destroyStore: removeStore.bind(null, name),

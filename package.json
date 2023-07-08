@@ -1,6 +1,6 @@
 {
   "name": "fertile",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "description": "一个简单的react状态管理库",
   "main": "dist/fertile.cjs.js",
   "module": "dist/fertile.esm.js",
