@@ -4,16 +4,16 @@ type AnnotationsMap<T, V> = {
   [P in Exclude<keyof T, "toString">]?: V;
 };
 
-type StoreName = string;
-type Property = string | symbol;
-type StoreEffectCallback = (()=>any);
-type DesMap = Map<Property, Set<StoreEffectCallback>>;
-type ReactiveObject = object
+export type StoreName = string | symbol;
+export type Property = string | symbol;
+export type StoreEffectCallback = (()=>any);
+export type DesMap = Map<Property, Set<StoreEffectCallback>>;
+export type ReactiveObject = object;
 
 export type UseStoreHook<T> = (disabledUpdate?:boolean) => T
 
 // 不需要响应的值
-const observableMap:WeakMap<object, Record<PropertyKey, boolean | undefined>> = new WeakMap();
+const observableMap:WeakMap<ReactiveObject, Record<PropertyKey, boolean | undefined>> = new WeakMap();
 // 多个store，通过名称关联
 const storeMap:Map<StoreName, any> = new Map();
 // 响应数据时对应执行所有更新函数
@@ -21,11 +21,11 @@ const storeEffectMap:WeakMap<ReactiveObject, DesMap> = new WeakMap();
 // 更新函数对应响应对象，主要用于更新函数销毁,并对storeEffectMap的相关数据进行删除
 const effectCallbackTargets:WeakMap<StoreEffectCallback, Set<ReactiveObject>> = new WeakMap();
 
+const triggerCallbacks:Set<StoreEffectCallback> = new Set();
+
 let currStoreEffectCallback:StoreEffectCallback | null = null;
 
-function getStoreName(name?:string){
-  return name || "default"
-}
+let pending = false;
 
 function createLocalStore<T extends object>(stores:T, name:string){
   return createStore(stores, name)
@@ -61,9 +61,6 @@ function track(target:any, property:Property){
   }
 }
 
-
-const triggerCallbacks:Set<StoreEffectCallback> = new Set();
-let pending = false;
 /**
  * 触发响应更新
  * @param target 
@@ -74,6 +71,7 @@ function trigger(target:any, property:Property){
   const desMap = storeEffectMap.get(target);
   if(!desMap) return;
 
+  // 获取所有副作用函数
   const effectCallbacks = desMap.get(property);
   if(effectCallbacks){
     effectCallbacks.forEach(callback =>{
@@ -97,6 +95,7 @@ function runUpdate(){
   triggerCallbacks.forEach(callback =>{
     callback();
   });
+  triggerCallbacks.clear();
 }
 
 function removeProperty(target:any, property:Property){
@@ -106,6 +105,10 @@ function removeProperty(target:any, property:Property){
   desMap.delete(property)
 }
 
+/**
+ * 组件销毁时移除副作用函数
+ * @param effectCallback 
+ */
 function removeCallback(effectCallback:StoreEffectCallback){
   const targets = effectCallbackTargets.get(effectCallback);
   if(targets){
@@ -119,13 +122,12 @@ function removeCallback(effectCallback:StoreEffectCallback){
     });
     effectCallbackTargets.delete(effectCallback)
   }
-
 }
 
-export function createStore<T extends object>(stores:T, name?:string):{useStore:UseStoreHook<T>, stores:T}{
+export function createStore<T extends object>(stores:T, name?:string){
   const storeSelf:any = stores;
   const allStores:any = {};
-  const storeName = getStoreName(name);
+  const storeName = name || "default";
   Object.keys(storeSelf).forEach(key =>{
       allStores[key] = new Proxy(storeSelf[key], {
       get(target, property){
@@ -153,11 +155,7 @@ export function createStore<T extends object>(stores:T, name?:string):{useStore:
     });
   });
   storeMap.set(storeName, allStores);
-  return {
-    useStore: ((disabledUpdate?:boolean)=>useStore(disabledUpdate, storeName)) as UseStoreHook<T>, 
-    stores: 
-    allStores
-  };
+  return getStore<T>(storeName);
 }
 
 /**
@@ -168,23 +166,15 @@ export function createStore<T extends object>(stores:T, name?:string):{useStore:
  */
 export function useCreateLocalStore<T extends object>(stores:()=>T | T, name:string){
   return useMemo(() => {
-    // const _stores = typeof stores === "function" ? (stores as Function)() : stores
-    const _stores = getStore<T>(name);
-		const rel =
-      _stores || 
-			createLocalStore(typeof stores === "function" ? stores() : stores, name);
-		return {
-			...rel,
-			destroyStore: removeStore.bind(null, name),
-		};
+    return hasStore(name) ? getStore<T>(name) : createLocalStore(typeof stores === "function" ? stores() : stores, name);
 	}, [name]);
 }
 
-export function removeStore(name:string | "default"){
+export function removeStore(name:StoreName){
   storeMap.delete(name);
 }
 
-export function hasStore(name:string | "default"){
+export function hasStore(name:StoreName){
   return storeMap.has(name);
 }
 
@@ -193,11 +183,13 @@ export function hasStore(name:string | "default"){
  * @param name 默认 "default"
  * @returns 
  */
-export function getStore<T extends object>(name:string | "default"):{useStore:UseStoreHook<T>, stores:T} | undefined{
-  if(hasStore(name)){
+export function getStore<T = any>(name:StoreName):{useStore:UseStoreHook<T>, stores:T | undefined, destroyStore: () => void}{
     const stores = storeMap.get(name);
-    return {useStore: ((disabledUpdate?:boolean)=>useStore(disabledUpdate, name)) as UseStoreHook<T>, stores: stores}
-  }
+    return {
+      useStore: ((disabledUpdate?:boolean)=>useStore(disabledUpdate, name)) as UseStoreHook<T>,
+      destroyStore: removeStore.bind(null, name), 
+      stores: stores
+    }
 }
 
 // 可以指定哪些属性作为或者不作为响应数据
@@ -205,10 +197,10 @@ export function makeObservable<T extends object>(target:T, overrides: Annotation
   observableMap.set(target, overrides);
 }
 
-export function useStore<T=any>(disabledAutoUpdate?:boolean, name?:string):T{
+function useStore<T=any>(disabledAutoUpdate?:boolean, name?:StoreName):T{
   const [, setForceUpdate] = useState({});
   useEffect(()=>{
-    return ()=> removeCallback(storeEffectCallback)
+    return ()=> removeCallback(storeEffectCallback);
   }, []);
 
   const storeEffectCallback = useCallback(()=>{
@@ -219,5 +211,5 @@ export function useStore<T=any>(disabledAutoUpdate?:boolean, name?:string):T{
 
   currStoreEffectCallback = storeEffectCallback;
 
-  return storeMap.get(getStoreName(name));
+  return storeMap.get(name || "default")
 }

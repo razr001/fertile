@@ -1,6 +1,6 @@
 import ReactDOM from 'react-dom/client'
 import React, { useEffect, useMemo, useState } from 'react'
-import {createStore, getStore, removeStore, useCreateLocalStore, useStore} from "../../src/fertile"
+import {createStore, getStore, removeStore, useCreateLocalStore} from "../../src/fertile"
 import MyStore from "./MyStore"
 
 
@@ -20,8 +20,8 @@ function App2(){
 }
 
 function UseLocal(){
-  const localStore = useStore(false, "App2").myStore;
-  const {count, test} = localStore;
+  const {useStore} = getStore("App2");
+  const {count, test} = useStore().myStore;
   return  <div>app1 local: {count} {test?.total}</div>
 }
 
