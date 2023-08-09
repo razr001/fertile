@@ -122,6 +122,9 @@ function removeCallback(effectCallback:StoreEffectCallback){
     });
     effectCallbackTargets.delete(effectCallback)
   }
+  if(currStoreEffectCallback === effectCallback){
+    currStoreEffectCallback = null;
+  }
 }
 
 export function createStore<T extends object>(stores:T, name?:string){
